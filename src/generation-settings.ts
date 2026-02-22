@@ -30,6 +30,11 @@ export function applyGenerationSettings(
   }
 
   const existing = config ?? {};
+
+  if (doesNotSupportThinking(model)) {
+    return existing;
+  }
+
   const thinkingConfig = toThinkingConfig(settings, model);
 
   return {
@@ -55,7 +60,9 @@ function toThinkingConfig(
 
     return {
       includeThoughts: settings.includeThoughts,
-      thinkingLevel: ThinkingLevel.MINIMAL,
+      thinkingLevel: supportsMinimalThinking(model)
+        ? ThinkingLevel.MINIMAL
+        : ThinkingLevel.LOW,
     };
   }
 
@@ -68,13 +75,7 @@ function toThinkingConfig(
     };
   }
 
-  const level = toThinkingLevel(settings.reasoningEffort);
-  if (requiresLimitedThinkingLevels(model) && level === ThinkingLevel.MEDIUM) {
-    return {
-      includeThoughts: settings.includeThoughts,
-      thinkingLevel: ThinkingLevel.LOW,
-    };
-  }
+  const level = clampThinkingLevel(toThinkingLevel(settings.reasoningEffort), model);
 
   return {
     includeThoughts: settings.includeThoughts,
@@ -95,6 +96,14 @@ function toThinkingLevel(effort: ReasoningEffort): ThinkingLevel {
   return ThinkingLevel.MEDIUM;
 }
 
+export function doesNotSupportThinking(model?: string): boolean {
+  if (!model) {
+    return false;
+  }
+  const lower = model.toLowerCase();
+  return lower.includes("flash-lite") || lower.includes("nano");
+}
+
 function shouldUseBudgetMode(model?: string): boolean {
   if (!model) {
     return false;
@@ -103,13 +112,28 @@ function shouldUseBudgetMode(model?: string): boolean {
   return model.includes("2.5") || model.includes("2.0");
 }
 
-function requiresLimitedThinkingLevels(model?: string): boolean {
+function supportsMinimalThinking(model?: string): boolean {
   if (!model) {
-    return false;
+    return true;
   }
-
   const lower = model.toLowerCase();
-  return lower.includes("gemini-3-pro-preview");
+  return !lower.includes("-pro");
+}
+
+function clampThinkingLevel(level: ThinkingLevel, model?: string): ThinkingLevel {
+  if (!model) {
+    return level;
+  }
+  const lower = model.toLowerCase();
+  const isPro = lower.includes("-pro");
+
+  if (isPro && level === ThinkingLevel.MINIMAL) {
+    return ThinkingLevel.LOW;
+  }
+  if (lower.includes("gemini-3-pro-preview") && level === ThinkingLevel.MEDIUM) {
+    return ThinkingLevel.LOW;
+  }
+  return level;
 }
 
 function budgetForEffort(effort: ReasoningEffort): number {

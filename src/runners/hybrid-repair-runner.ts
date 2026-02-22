@@ -15,7 +15,7 @@ import type {
   RunnerTraceStep,
 } from "../contracts";
 import type { GenerationSettings } from "../generation-settings";
-import { applyGenerationSettings } from "../generation-settings";
+import { applyGenerationSettings, doesNotSupportThinking } from "../generation-settings";
 import {
   buildFinalResponsePrompt,
   buildToolSelectionPrompt,
@@ -51,7 +51,10 @@ export async function runHybridRepairRunner(
   const contents = [createUserContent(userPrompt)];
   const maxTurns = options.maxTurns ?? 3;
   const repairModel = options.repairModel ?? options.model;
-  const mode = options.functionCallingMode ?? FunctionCallingConfigMode.VALIDATED;
+  const preferredMode = options.functionCallingMode ?? FunctionCallingConfigMode.VALIDATED;
+  const mode = doesNotSupportThinking(options.model)
+    ? FunctionCallingConfigMode.ANY
+    : preferredMode;
 
   for (let turn = 0; turn < maxTurns; turn += 1) {
     const request: GenerateContentParameters = {

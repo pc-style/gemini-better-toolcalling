@@ -16,7 +16,7 @@ import type {
   RunnerTraceStep,
 } from "../contracts";
 import type { GenerationSettings } from "../generation-settings";
-import { applyGenerationSettings } from "../generation-settings";
+import { applyGenerationSettings, doesNotSupportThinking } from "../generation-settings";
 import {
   buildFinalResponsePrompt,
   finalResponseJsonSchema,
@@ -54,6 +54,9 @@ export async function runSingleToolRouterRunner(
   const dispatchDeclaration = createDispatchDeclaration(registry);
   const maxTurns = options.maxTurns ?? 4;
   const contents = [createUserContent(userPrompt)];
+  const fcMode = doesNotSupportThinking(options.model)
+    ? FunctionCallingConfigMode.ANY
+    : FunctionCallingConfigMode.VALIDATED;
 
   for (let turn = 0; turn < maxTurns; turn += 1) {
     const request: GenerateContentParameters = {
@@ -64,7 +67,7 @@ export async function runSingleToolRouterRunner(
         tools: [{ functionDeclarations: [dispatchDeclaration] }],
         toolConfig: {
           functionCallingConfig: {
-            mode: FunctionCallingConfigMode.VALIDATED,
+            mode: fcMode,
             allowedFunctionNames: [DISPATCH_TOOL_NAME],
           },
         },
