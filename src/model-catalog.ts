@@ -1,9 +1,11 @@
 import { resolveEnvSettings } from "./env";
 
+export const MODEL_CATALOG_FALLBACK = "gemini-3-flash-preview";
+
 export const MODEL_CATALOG_DEFAULTS = [
   "gemini-3.1-pro-preview",
   "gemini-3-pro-preview",
-  "gemini-3-flash-preview",
+  MODEL_CATALOG_FALLBACK,
   "gemini-2.5-pro",
   "gemini-2.5-flash",
   "gemini-2.5-flash-lite",
@@ -47,7 +49,35 @@ export async function listAvailableModelsFromApi(): Promise<string[]> {
 
 export async function getModelOptions(): Promise<string[]> {
   const models = await listAvailableModelsFromApi();
-  return models.sort((a, b) => a.localeCompare(b));
+  return [...new Set(models)]
+    .filter((model) => !isUnsupportedLegacyModel(model))
+    .sort((a, b) => a.localeCompare(b));
+}
+
+export async function probeModelAvailability(model: string): Promise<void> {
+  const { apiKey } = await resolveEnvSettings();
+  if (!apiKey) {
+    throw new Error("Missing API key. Set GOOGLE_API_KEY or GEMINI_API_KEY.");
+  }
+
+  const response = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        contents: [{ role: "user", parts: [{ text: "ping" }] }],
+        generationConfig: { maxOutputTokens: 1, temperature: 0 },
+      }),
+    },
+  );
+
+  if (response.ok) {
+    return;
+  }
+
+  const body = (await response.text()).trim();
+  throw new Error(body.length > 0 ? body : `Model probe failed (${response.status})`);
 }
 
 function isToolCallingFriendlyModel(id: string, methods: string[]): boolean {
@@ -60,8 +90,8 @@ function isToolCallingFriendlyModel(id: string, methods: string[]): boolean {
     return false;
   }
 
-  // Exclude known multimodal/non-chat model families and legacy unavailable ids.
-  if (lower === "gemini-2.0-flash-lite-001") {
+  // Exclude known legacy ids unavailable to many users.
+  if (isUnsupportedLegacyModel(lower)) {
     return false;
   }
 
@@ -81,4 +111,16 @@ function isToolCallingFriendlyModel(id: string, methods: string[]): boolean {
   ];
 
   return excludedFragments.every((fragment) => !lower.includes(fragment));
+}
+
+export function isUnsupportedLegacyModel(id: string): boolean {
+  const lower = id.toLowerCase();
+  return lower.startsWith("gemini-2.0-") || lower.startsWith("gemini-1.5-");
+}
+
+export function normalizeRunnableModel(model: string | undefined): string | undefined {
+  if (!model) {
+    return undefined;
+  }
+  return isUnsupportedLegacyModel(model) ? undefined : model;
 }

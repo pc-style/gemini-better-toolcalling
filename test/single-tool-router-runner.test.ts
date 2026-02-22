@@ -149,4 +149,45 @@ describe("single-tool-router runner", () => {
 
     expect(followUpContents[1]).toBe(rawModelContent);
   });
+
+  it("repairs invalid dispatch tool args with a structured repair step", async () => {
+    const client = new MockModelClient([
+      {
+        text: "",
+        functionCalls: [
+          {
+            id: "call_1",
+            name: "dispatch_tool",
+            args: {
+              toolName: "sum_numbers",
+              argumentsJson: '{"nums":[2,4,8]}',
+            },
+          },
+        ],
+        raw: {},
+      },
+      {
+        text: '{"numbers":[2,4,8]}',
+        functionCalls: [],
+        raw: {},
+      },
+      {
+        text: "The total is 14.",
+        functionCalls: [],
+        raw: {},
+      },
+    ]);
+
+    const result = await runSingleToolRouterRunner(
+      client,
+      createTestToolRegistry(),
+      "Add 2, 4, and 8",
+      { model: "test-model" },
+    );
+
+    expect(result.finalText).toBe("The total is 14.");
+    expect(result.toolCalls.length).toBe(1);
+    expect(result.toolCalls[0]?.repaired).toBe(true);
+    expect(result.toolCalls[0]?.args).toEqual({ numbers: [2, 4, 8] });
+  });
 });

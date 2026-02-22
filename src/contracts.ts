@@ -45,6 +45,7 @@ export interface ModelFunctionCall {
 
 export interface ModelResult {
   text: string;
+  thoughts?: string[];
   functionCalls: ModelFunctionCall[];
   raw: unknown;
 }
@@ -52,4 +53,3 @@ export interface ModelResult {
 export interface ModelClient {
   generateContent(request: GenerateContentParameters): Promise<ModelResult>;
 }
-

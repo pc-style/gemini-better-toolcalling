@@ -45,20 +45,33 @@ function toThinkingConfig(
   settings: GenerationSettings,
   model?: string,
 ): ThinkingConfig {
+  if (!settings.thinking) {
+    return {
+      includeThoughts: settings.includeThoughts,
+      thinkingBudget: 0,
+    };
+  }
+
   const useBudget = shouldUseBudgetMode(model);
 
   if (useBudget) {
     return {
       includeThoughts: settings.includeThoughts,
-      thinkingBudget: settings.thinking ? budgetForEffort(settings.reasoningEffort) : 0,
+      thinkingBudget: budgetForEffort(settings.reasoningEffort),
+    };
+  }
+
+  const level = toThinkingLevel(settings.reasoningEffort);
+  if (requiresLimitedThinkingLevels(model) && level === ThinkingLevel.MEDIUM) {
+    return {
+      includeThoughts: settings.includeThoughts,
+      thinkingLevel: ThinkingLevel.LOW,
     };
   }
 
   return {
     includeThoughts: settings.includeThoughts,
-    thinkingLevel: settings.thinking
-      ? toThinkingLevel(settings.reasoningEffort)
-      : ThinkingLevel.MINIMAL,
+    thinkingLevel: level,
   };
 }
 
@@ -83,9 +96,18 @@ function shouldUseBudgetMode(model?: string): boolean {
   return model.includes("2.5") || model.includes("2.0");
 }
 
+function requiresLimitedThinkingLevels(model?: string): boolean {
+  if (!model) {
+    return false;
+  }
+
+  const lower = model.toLowerCase();
+  return lower.includes("gemini-3-pro-preview");
+}
+
 function budgetForEffort(effort: ReasoningEffort): number {
   if (effort === "minimal") {
-    return 256;
+    return 512;
   }
   if (effort === "low") {
     return 1024;

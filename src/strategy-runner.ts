@@ -13,6 +13,10 @@ import {
   type GenerationSettings,
 } from "./generation-settings";
 import { GoogleModelClient } from "./gemini-client";
+import {
+  MODEL_CATALOG_FALLBACK,
+  normalizeRunnableModel,
+} from "./model-catalog";
 import { runHybridRepairRunner } from "./runners/hybrid-repair-runner";
 import { runSingleToolRouterRunner } from "./runners/single-tool-router-runner";
 import { runStructuredJsonRunner } from "./runners/structured-json-runner";
@@ -50,12 +54,12 @@ export interface PlaygroundResult extends RunnerResult {
 }
 
 export function getDefaultModel(): string {
-  return process.env.GEMINI_MODEL ?? "gemini-3-flash-preview";
+  return normalizeRunnableModel(process.env.GEMINI_MODEL) ?? MODEL_CATALOG_FALLBACK;
 }
 
 export async function resolveDefaultModel(): Promise<string> {
   const env = await resolveEnvSettings();
-  return env.model ?? getDefaultModel();
+  return normalizeRunnableModel(env.model) ?? getDefaultModel();
 }
 
 export async function resolveApiKeyFromEnv(): Promise<string> {
@@ -103,6 +107,23 @@ export async function runStrategy(config: StrategyRunConfig): Promise<Playground
             `retriesUsed=${attempt - 1}`,
           ]
         : undefined;
+
+      if (runLogs && runVerbose) {
+        logger(
+          `[verbose] attempts=${attempt} toolCalls=${result.toolCalls.length} traceSteps=${result.trace.length} finalTextLength=${result.finalText.length}`,
+        );
+        for (const [index, call] of result.toolCalls.entries()) {
+          logger(
+            `[tool] #${index + 1} name=${call.toolName} repaired=${call.repaired} args=${safeOneLineJson(call.args)} result=${safeOneLineJson(call.result)}`,
+          );
+        }
+        const thoughtSteps = result.trace.filter((step) => step.kind === "thought");
+        for (const step of thoughtSteps) {
+          const rawText =
+            typeof step.data?.text === "string" ? step.data.text : "";
+          logger(`[thought] ${step.detail} ${truncate(rawText, 220)}`);
+        }
+      }
 
       return {
         ...result,
@@ -203,4 +224,19 @@ function normalizeProcessApiKeyEnv(apiKey: string): void {
   process.env.GOOGLE_API_KEY = apiKey;
   delete process.env.GEMINI_API_KEY;
   apiKeyEnvNormalized = true;
+}
+
+function safeOneLineJson(value: unknown): string {
+  try {
+    return truncate(JSON.stringify(value), 220);
+  } catch {
+    return "[unserializable]";
+  }
+}
+
+function truncate(value: string, max: number): string {
+  if (value.length <= max) {
+    return value;
+  }
+  return `${value.slice(0, Math.max(0, max - 1))}…`;
 }

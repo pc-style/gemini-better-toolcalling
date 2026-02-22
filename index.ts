@@ -1,5 +1,10 @@
 import { defaultGenerationSettings, type ReasoningEffort } from "./src/generation-settings";
-import { getModelOptions } from "./src/model-catalog";
+import {
+  getModelOptions,
+  isUnsupportedLegacyModel,
+  MODEL_CATALOG_FALLBACK,
+  normalizeRunnableModel,
+} from "./src/model-catalog";
 import { PROMPT_PRESETS } from "./src/prompt-presets";
 import type { PromptPreset } from "./src/prompt-presets";
 import {
@@ -10,6 +15,7 @@ import {
 } from "./src/strategy-runner";
 import { runBenchmark } from "./src/benchmark";
 import { resolveEnvSettings } from "./src/env";
+import { createFileLogger } from "./src/run-logger";
 
 interface CommonCliSettings {
   model: string;
@@ -68,7 +74,16 @@ async function main(): Promise<void> {
     console.error(`[env] source=${env.source}`);
   }
 
-  const logger = options.logs ? (line: string) => console.error(line) : undefined;
+  const fileLogger = options.logs ? createFileLogger("cli") : undefined;
+  if (fileLogger) {
+    console.error(`[log-file] ${fileLogger.path}`);
+  }
+  const logger = options.logs
+    ? (line: string) => {
+        console.error(line);
+        fileLogger?.log(line);
+      }
+    : undefined;
 
   if (options.mode === "single") {
     const result = await runStrategy({
@@ -180,7 +195,14 @@ function parseArgs(args: string[], defaultModel: string): CliOptions {
 
 function parseCommonSettings(args: string[], defaultModel: string): CommonCliSettings {
   const defaults = defaultGenerationSettings();
-  const model = parseStringFlag(args, "--model=") ?? defaultModel;
+  const selectedModel = parseStringFlag(args, "--model=");
+  if (selectedModel && isUnsupportedLegacyModel(selectedModel)) {
+    throw new Error(
+      `Model '${selectedModel}' is legacy/unavailable. Use --list-models and choose a current model (recommended: ${MODEL_CATALOG_FALLBACK}).`,
+    );
+  }
+
+  const model = normalizeRunnableModel(selectedModel ?? defaultModel) ?? MODEL_CATALOG_FALLBACK;
   const repairModel = parseStringFlag(args, "--repair-model=");
   const routerMaxTurns = parseOptionalIntFlag(args, "--router-max-turns=");
   const hybridMaxTurns = parseOptionalIntFlag(args, "--hybrid-max-turns=");
@@ -233,15 +255,22 @@ function resolvePromptFromArgs(args: string[]): string {
 function parseModelListFlag(args: string[], fallback: string): string[] {
   const raw = parseStringFlag(args, "--models=");
   if (!raw) {
-    return [fallback];
+    return [normalizeRunnableModel(fallback) ?? MODEL_CATALOG_FALLBACK];
   }
 
   const values = raw
     .split(",")
     .map((item) => item.trim())
-    .filter((item) => item.length > 0);
+    .filter((item) => item.length > 0)
+    .filter((item) => !isUnsupportedLegacyModel(item));
 
-  return values.length > 0 ? values : [fallback];
+  if (values.length === 0) {
+    throw new Error(
+      `All models in --models are legacy/unavailable. Use --list-models and select current models (recommended: ${MODEL_CATALOG_FALLBACK}).`,
+    );
+  }
+
+  return values;
 }
 
 function parseStrategyListFlag(args: string[]): Strategy[] {

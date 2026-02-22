@@ -72,6 +72,24 @@ describe("demo tool registry", () => {
     expect(output).toEqual({ percentage: 57.5, precision: 1 });
   });
 
+  it("normalizes percentage alias args", async () => {
+    const registry = createDemoToolRegistry();
+    const validation = registry.validateArgs("calculate_percentage", {
+      part: "23",
+      total: "40",
+      decimals: "1",
+    });
+    expect(validation.ok).toBe(true);
+    if (!validation.ok) {
+      return;
+    }
+
+    const output = await registry.execute("calculate_percentage", validation.args, {
+      now: new Date("2026-01-01T00:00:00.000Z"),
+    });
+    expect(output).toEqual({ percentage: 57.5, precision: 1 });
+  });
+
   it("extracts number sequence with optional dedupe", async () => {
     const registry = createDemoToolRegistry();
     const validation = registry.validateArgs("extract_number_sequence", {
@@ -107,5 +125,41 @@ describe("demo tool registry", () => {
     });
 
     expect(output).toEqual({ excerpt: "benchmark out...", truncated: true });
+  });
+
+  it("normalizes temperature aliases and unit casing", async () => {
+    const registry = createDemoToolRegistry();
+    const validation = registry.validateArgs("convert_temperature", {
+      temp: "95",
+      from: "fahrenheit",
+      to: "c",
+    });
+    expect(validation.ok).toBe(true);
+    if (!validation.ok) {
+      return;
+    }
+
+    const output = await registry.execute("convert_temperature", validation.args, {
+      now: new Date("2026-01-01T00:00:00.000Z"),
+    });
+    expect(output).toEqual({ value: 35, unit: "C" });
+  });
+
+  it("normalizes excerpt aliases", async () => {
+    const registry = createDemoToolRegistry();
+    const validation = registry.validateArgs("trim_and_excerpt", {
+      content: "  Gemini reliability benchmark output is easier now  ",
+      limit: "16",
+      ellipsis: "yes",
+    });
+    expect(validation.ok).toBe(true);
+    if (!validation.ok) {
+      return;
+    }
+
+    const output = await registry.execute("trim_and_excerpt", validation.args, {
+      now: new Date("2026-01-01T00:00:00.000Z"),
+    });
+    expect(output).toEqual({ excerpt: "Gemini reliab...", truncated: true });
   });
 });

@@ -9,7 +9,12 @@ import {
 } from "@google/genai";
 import { z } from "zod";
 
-import type { ModelClient, RunnerResult, RunnerTraceStep } from "../contracts";
+import type {
+  JsonObject,
+  ModelClient,
+  RunnerResult,
+  RunnerTraceStep,
+} from "../contracts";
 import type { GenerationSettings } from "../generation-settings";
 import { applyGenerationSettings } from "../generation-settings";
 import {
@@ -17,7 +22,11 @@ import {
   finalResponseJsonSchema,
   parseFinalResponseText,
 } from "../core/intents";
-import { parseObjectWithRepair } from "../core/json-utils";
+import {
+  parseJsonWithRepair,
+  parseObjectWithRepair,
+  toJsonObject,
+} from "../core/json-utils";
 import { extractFirstModelFunctionCallContent } from "../core/response-utils";
 import { ToolRegistry } from "../tool-registry";
 
@@ -67,6 +76,7 @@ export async function runSingleToolRouterRunner(
 
     trace.push({ kind: "llm", detail: `turn_${turn}_request_dispatch` });
     const response = await client.generateContent(request);
+    appendThoughtTrace(trace, `turn_${turn}`, response.thoughts ?? []);
     const functionCall = response.functionCalls[0];
 
     if (!functionCall) {
@@ -111,6 +121,7 @@ export async function runSingleToolRouterRunner(
           options.model,
         ),
       });
+      appendThoughtTrace(trace, "finalize", finalize.thoughts ?? []);
 
       return {
         strategy: "single-tool-router",
@@ -134,19 +145,25 @@ export async function runSingleToolRouterRunner(
       argumentsJson,
       "dispatch argumentsJson",
     );
-    const validation = registry.validateArgs(toolName, maybeArgs);
-    if (!validation.ok) {
-      throw new Error(`Tool args validation failed: ${validation.error}`);
-    }
+    const validated = await resolveDispatchToolArgs(
+      client,
+      registry,
+      userPrompt,
+      toolName,
+      maybeArgs,
+      options.model,
+      trace,
+      options.generationSettings,
+    );
 
-    const toolResult = await registry.execute(toolName, validation.args, {
+    const toolResult = await registry.execute(toolName, validated.args, {
       now: new Date(),
     });
     toolCalls.push({
       toolName,
-      args: validation.args,
+      args: validated.args,
       result: toolResult,
-      repaired: false,
+      repaired: validated.repaired,
     });
 
     const callId = functionCall.id ?? `dispatch_call_${turn}`;
@@ -176,6 +193,20 @@ export async function runSingleToolRouterRunner(
   };
 }
 
+function appendThoughtTrace(
+  trace: RunnerTraceStep[],
+  step: string,
+  thoughts: string[],
+): void {
+  for (const thought of thoughts) {
+    trace.push({
+      kind: "thought",
+      detail: `${step}_thought`,
+      data: { text: thought },
+    });
+  }
+}
+
 function createDispatchDeclaration(registry: ToolRegistry): FunctionDeclaration {
   return {
     name: DISPATCH_TOOL_NAME,
@@ -199,4 +230,75 @@ function createDispatchDeclaration(registry: ToolRegistry): FunctionDeclaration 
       required: ["toolName", "argumentsJson"],
     },
   };
+}
+
+async function resolveDispatchToolArgs(
+  client: ModelClient,
+  registry: ToolRegistry,
+  userPrompt: string,
+  toolName: string,
+  argsCandidate: JsonObject,
+  model: string,
+  trace: RunnerTraceStep[],
+  generationSettings: GenerationSettings | undefined,
+): Promise<{ args: JsonObject; repaired: boolean }> {
+  const validation = registry.validateArgs(toolName, argsCandidate);
+  if (validation.ok) {
+    return { args: validation.args, repaired: false };
+  }
+
+  trace.push({
+    kind: "repair",
+    detail: "dispatch_args_invalid_attempting_llm_repair",
+    data: { toolName, reason: validation.error },
+  });
+  const repairedArgs = await repairDispatchArgsWithLlm(
+    client,
+    registry,
+    userPrompt,
+    toolName,
+    argsCandidate,
+    model,
+    trace,
+    generationSettings,
+  );
+  const repairedValidation = registry.validateArgs(toolName, repairedArgs);
+  if (!repairedValidation.ok) {
+    throw new Error(`Tool args validation failed: ${repairedValidation.error}`);
+  }
+
+  return { args: repairedValidation.args, repaired: true };
+}
+
+async function repairDispatchArgsWithLlm(
+  client: ModelClient,
+  registry: ToolRegistry,
+  userPrompt: string,
+  toolName: string,
+  brokenArgs: JsonObject,
+  model: string,
+  trace: RunnerTraceStep[],
+  generationSettings: GenerationSettings | undefined,
+): Promise<JsonObject> {
+  const response = await client.generateContent({
+    model,
+    contents: [
+      "Repair these tool args so they exactly satisfy the tool JSON schema.",
+      "Return only JSON for the repaired args object.",
+      `Tool: ${toolName}`,
+      `Schema: ${JSON.stringify(registry.getArgsJsonSchema(toolName))}`,
+      `User request: ${userPrompt}`,
+      `Broken args: ${JSON.stringify(brokenArgs)}`,
+    ].join("\n"),
+    config: applyGenerationSettings(
+      {
+        responseMimeType: "application/json",
+        responseJsonSchema: registry.getArgsJsonSchema(toolName),
+      },
+      generationSettings,
+      model,
+    ),
+  });
+  appendThoughtTrace(trace, "repair", response.thoughts ?? []);
+  return toJsonObject(parseJsonWithRepair(response.text), "Repaired dispatch args");
 }

@@ -23,11 +23,18 @@ const averageNumbersArgsSchema = z.object({
   numbers: z.array(z.number()).min(1),
 });
 
-const convertTemperatureArgsSchema = z.object({
+const convertTemperatureArgsSchema = z.preprocess((raw) => {
+  const input = toObject(raw);
+  return {
+    value: pickNumber(input.value, input.temperature, input.temp, input.degrees),
+    fromUnit: normalizeUnit(input.fromUnit, input.from, input.sourceUnit, input.inputUnit),
+    toUnit: normalizeUnit(input.toUnit, input.to, input.targetUnit, input.outputUnit),
+  };
+}, z.object({
   value: z.number(),
   fromUnit: z.enum(["C", "F"]),
   toUnit: z.enum(["C", "F"]),
-});
+}));
 
 const extractEmailsArgsSchema = z.object({
   text: z.string().min(1),
@@ -51,24 +58,56 @@ const sortNumbersArgsSchema = z.object({
   order: z.enum(["asc", "desc"]).default("asc"),
 });
 
-const calculatePercentageArgsSchema = z.object({
+const calculatePercentageArgsSchema = z.preprocess((raw) => {
+  const input = toObject(raw);
+  return {
+    numerator: pickNumber(
+      input.numerator,
+      input.part,
+      input.value,
+      input.count,
+      input.hitCount,
+    ),
+    denominator: pickNumber(
+      input.denominator,
+      input.total,
+      input.base,
+      input.outOf,
+      input.max,
+    ),
+    precision: pickInt(input.precision, input.decimals, input.decimalPlaces),
+  };
+}, z.object({
   numerator: z.number(),
   denominator: z.number().refine((value) => value !== 0, {
     message: "denominator must not be 0",
   }),
   precision: z.number().int().min(0).max(4).default(2),
-});
+}));
 
 const extractNumberSequenceArgsSchema = z.object({
   text: z.string().min(1),
   dedupe: z.boolean().default(false),
 });
 
-const trimAndExcerptArgsSchema = z.object({
+const trimAndExcerptArgsSchema = z.preprocess((raw) => {
+  const input = toObject(raw);
+  return {
+    text: pickString(input.text, input.input, input.content),
+    maxLength: pickInt(
+      input.maxLength,
+      input.maxLen,
+      input.limit,
+      input.length,
+      input.charLimit,
+    ),
+    withEllipsis: pickBoolean(input.withEllipsis, input.ellipsis, input.useEllipsis),
+  };
+}, z.object({
   text: z.string().min(1),
   maxLength: z.number().int().min(5).max(240),
   withEllipsis: z.boolean().default(true),
-});
+}));
 
 export function createDemoToolRegistry(): ToolRegistry {
   const registry = new ToolRegistry();
@@ -316,4 +355,85 @@ export function createTestToolRegistry(): ToolRegistry {
 
 function roundTwo(value: number): number {
   return Math.round(value * 100) / 100;
+}
+
+function toObject(value: unknown): Record<string, unknown> {
+  if (typeof value === "object" && value !== null && !Array.isArray(value)) {
+    return value as Record<string, unknown>;
+  }
+  return {};
+}
+
+function pickNumber(...candidates: unknown[]): number | undefined {
+  for (const candidate of candidates) {
+    const parsed = toNumber(candidate);
+    if (typeof parsed === "number") {
+      return parsed;
+    }
+  }
+  return undefined;
+}
+
+function pickInt(...candidates: unknown[]): number | undefined {
+  const value = pickNumber(...candidates);
+  if (typeof value !== "number") {
+    return undefined;
+  }
+  return Math.trunc(value);
+}
+
+function pickString(...candidates: unknown[]): string | undefined {
+  for (const candidate of candidates) {
+    if (typeof candidate === "string" && candidate.trim().length > 0) {
+      return candidate;
+    }
+  }
+  return undefined;
+}
+
+function pickBoolean(...candidates: unknown[]): boolean | undefined {
+  for (const candidate of candidates) {
+    if (typeof candidate === "boolean") {
+      return candidate;
+    }
+    if (typeof candidate === "string") {
+      const lower = candidate.trim().toLowerCase();
+      if (lower === "true" || lower === "yes") {
+        return true;
+      }
+      if (lower === "false" || lower === "no") {
+        return false;
+      }
+    }
+  }
+  return undefined;
+}
+
+function toNumber(value: unknown): number | undefined {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value;
+  }
+  if (typeof value === "string") {
+    const parsed = Number(value.trim());
+    if (Number.isFinite(parsed)) {
+      return parsed;
+    }
+  }
+  return undefined;
+}
+
+function normalizeUnit(...candidates: unknown[]): "C" | "F" | undefined {
+  for (const candidate of candidates) {
+    if (typeof candidate !== "string") {
+      continue;
+    }
+    const lower = candidate.trim().toLowerCase();
+    if (lower === "c" || lower === "celsius" || lower === "centigrade") {
+      return "C";
+    }
+    if (lower === "f" || lower === "fahrenheit") {
+      return "F";
+    }
+  }
+  return undefined;
 }

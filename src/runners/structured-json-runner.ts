@@ -42,6 +42,7 @@ export async function runStructuredJsonRunner(
 
   trace.push({ kind: "llm", detail: "request_tool_intent" });
   const response = await client.generateContent(request);
+  appendThoughtTrace(trace, "intent", response.thoughts ?? []);
   trace.push({
     kind: "llm",
     detail: "received_tool_intent",
@@ -106,6 +107,7 @@ export async function runStructuredJsonRunner(
 
   trace.push({ kind: "llm", detail: "request_final_response" });
   const finalizeResponse = await client.generateContent(finalizeRequest);
+  appendThoughtTrace(trace, "finalize", finalizeResponse.thoughts ?? []);
   const finalText = parseFinalResponseText(finalizeResponse.text);
 
   return {
@@ -114,4 +116,18 @@ export async function runStructuredJsonRunner(
     toolCalls,
     trace,
   };
+}
+
+function appendThoughtTrace(
+  trace: RunnerTraceStep[],
+  step: string,
+  thoughts: string[],
+): void {
+  for (const thought of thoughts) {
+    trace.push({
+      kind: "thought",
+      detail: `${step}_thought`,
+      data: { text: thought },
+    });
+  }
 }

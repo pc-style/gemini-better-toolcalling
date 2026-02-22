@@ -3,8 +3,9 @@ import { Box, Text, render, useApp, useInput } from "ink";
 
 import { runBenchmark, type BenchmarkResult } from "./src/benchmark";
 import type { ReasoningEffort } from "./src/generation-settings";
-import { getModelOptions } from "./src/model-catalog";
+import { getModelOptions, probeModelAvailability } from "./src/model-catalog";
 import { PROMPT_PRESETS } from "./src/prompt-presets";
+import { createFileLogger } from "./src/run-logger";
 import {
   STRATEGIES,
   resolveDefaultModel,
@@ -89,8 +90,11 @@ function App(): React.JSX.Element {
   const [benchmarkResult, setBenchmarkResult] = useState<BenchmarkResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [runLogs, setRunLogs] = useState<string[]>([]);
+  const [runLogFilePath, setRunLogFilePath] = useState<string | null>(null);
   const [runningStartedRuns, setRunningStartedRuns] = useState(0);
   const [runningTotalRuns, setRunningTotalRuns] = useState(0);
+  const [isValidatingModel, setIsValidatingModel] = useState(false);
+  const [modelValidationError, setModelValidationError] = useState<string | null>(null);
   const [modelOptions, setModelOptions] = useState<string[]>([
     "gemini-3.1-pro-preview",
     "gemini-3-pro-preview",
@@ -256,6 +260,10 @@ function App(): React.JSX.Element {
     }
 
     if (screen === "model") {
+      if (isValidatingModel) {
+        return;
+      }
+
       if (key.downArrow) {
         setModelIndex((value) => Math.min(value + 1, modelOptions.length - 1));
         return;
@@ -271,9 +279,23 @@ function App(): React.JSX.Element {
         return;
       }
       if (key.return) {
-        setSelection((prev) => ({ ...prev, model: modelOptions[modelIndex] ?? prev.model }));
-        setSettingsIndex(0);
-        setScreen("settings");
+        const selectedModel = modelOptions[modelIndex] ?? selection.model;
+        setModelValidationError(null);
+        setIsValidatingModel(true);
+        void (async () => {
+          try {
+            await probeModelAvailability(selectedModel);
+            setSelection((prev) => ({ ...prev, model: selectedModel }));
+            setSettingsIndex(0);
+            setScreen("settings");
+          } catch (unknownError) {
+            const message =
+              unknownError instanceof Error ? unknownError.message : String(unknownError);
+            setModelValidationError(`Model check failed for '${selectedModel}': ${message}`);
+          } finally {
+            setIsValidatingModel(false);
+          }
+        })();
       }
       return;
     }
@@ -306,6 +328,7 @@ function App(): React.JSX.Element {
         setError(null);
         setShowRawJson(false);
         setRunLogs([]);
+        setRunLogFilePath(null);
         setRunningStartedRuns(0);
         setRunningTotalRuns(0);
         setScreen("running");
@@ -319,6 +342,7 @@ function App(): React.JSX.Element {
         setBenchmarkResult(null);
         setError(null);
         setRunLogs([]);
+        setRunLogFilePath(null);
         setRunningStartedRuns(0);
         setRunningTotalRuns(0);
         setScreen("running");
@@ -378,9 +402,15 @@ function App(): React.JSX.Element {
         selectedModels.length * selectedStrategies.length * selectedPresets.length * selection.settings.iterations;
       setRunningStartedRuns(0);
       setRunningTotalRuns(selection.mode === "benchmark" ? benchmarkTotalRuns : 1);
+      const fileLogger = selection.settings.logs ? createFileLogger("tui") : null;
+      setRunLogFilePath(fileLogger?.path ?? null);
+      if (fileLogger) {
+        setRunLogs((prev) => [...prev.slice(-25), `[log-file] ${fileLogger.path}`]);
+      }
 
       const logger = (line: string): void => {
         setRunLogs((prev) => [...prev.slice(-25), line]);
+        fileLogger?.log(line);
         if (line.startsWith("[bench]")) {
           setRunningStartedRuns((prev) => prev + 1);
         }
@@ -520,13 +550,25 @@ function App(): React.JSX.Element {
         )}
 
         {screen === "model" && (
-          <MenuList
-            title={selection.mode === "single" ? "4) Select Model" : "3) Select Primary Model"}
-            options={modelOptions}
-            selectedIndex={modelIndex}
-            footer="Enter: settings | Esc: back"
-            maxVisible={MAX_VISIBLE_MENU_OPTIONS}
-          />
+          <Box flexDirection="column">
+            <MenuList
+              title={selection.mode === "single" ? "4) Select Model" : "3) Select Primary Model"}
+              options={modelOptions}
+              selectedIndex={modelIndex}
+              footer={
+                isValidatingModel
+                  ? "Validating selected model with Gemini API..."
+                  : "Enter: validate + settings | Esc: back"
+              }
+              maxVisible={MAX_VISIBLE_MENU_OPTIONS}
+            />
+            {isValidatingModel ? (
+              <Text color="yellow">Checking model availability...</Text>
+            ) : null}
+            {modelValidationError ? (
+              <Text color="red">{modelValidationError}</Text>
+            ) : null}
+          </Box>
         )}
 
         {screen === "settings" && (
@@ -543,6 +585,7 @@ function App(): React.JSX.Element {
             logs={runLogs}
             startedRuns={runningStartedRuns}
             totalRuns={runningTotalRuns}
+            logFilePath={runLogFilePath}
           />
         )}
 
@@ -553,6 +596,7 @@ function App(): React.JSX.Element {
             benchmarkResult={benchmarkResult}
             error={error}
             showRawJson={showRawJson}
+            logFilePath={runLogFilePath}
           />
         )}
       </Box>
@@ -635,6 +679,7 @@ function RunningView(props: {
   logs: string[];
   startedRuns: number;
   totalRuns: number;
+  logFilePath: string | null;
 }): React.JSX.Element {
   const progressLabel =
     props.mode === "benchmark" && props.totalRuns > 0
@@ -659,6 +704,7 @@ function RunningView(props: {
       ) : (
         <Text dimColor>Waiting for first output...</Text>
       )}
+      {props.logFilePath ? <Text dimColor>Log file: {props.logFilePath}</Text> : null}
       <Text dimColor>Esc: cancel run</Text>
     </Box>
   );
@@ -670,6 +716,7 @@ function ResultView(props: {
   benchmarkResult: BenchmarkResult | null;
   error: string | null;
   showRawJson: boolean;
+  logFilePath: string | null;
 }): React.JSX.Element {
   if (props.error) {
     return (
@@ -678,12 +725,14 @@ function ResultView(props: {
           Run failed
         </Text>
         <Text>{props.error}</Text>
+        {props.logFilePath ? <Text dimColor>Log file: {props.logFilePath}</Text> : null}
         <Text dimColor>r: rerun | o: mode | p: prompt | m: model | g: settings</Text>
       </Box>
     );
   }
 
   if (props.mode === "single" && props.singleResult) {
+    const thoughtTrace = props.singleResult.trace.filter((step) => step.kind === "thought");
     return (
       <Box flexDirection="column">
         <Text bold color="green">
@@ -694,10 +743,29 @@ function ResultView(props: {
         <Text>Attempts: {props.singleResult.attempts}</Text>
         <Text>Duration: {props.singleResult.durationMs}ms</Text>
         <Text>Tool calls: {props.singleResult.toolCalls.length}</Text>
+        {props.singleResult.toolCalls.slice(0, 4).map((call, index) => (
+          <Text key={`${call.toolName}-${index}`} dimColor>
+            tool[{index + 1}] {call.toolName} repaired={call.repaired ? "yes" : "no"} args=
+            {truncateForUi(JSON.stringify(call.args), 110)}
+          </Text>
+        ))}
+        {props.singleResult.toolCalls.length > 4 ? (
+          <Text dimColor>... {props.singleResult.toolCalls.length - 4} more tool calls</Text>
+        ) : null}
+        <Text>Thought steps: {thoughtTrace.length}</Text>
+        {thoughtTrace.slice(0, 3).map((step, index) => (
+          <Text key={`${step.detail}-${index}`} dimColor>
+            thought[{index + 1}] {truncateForUi(String(step.data?.text ?? ""), 140)}
+          </Text>
+        ))}
+        {thoughtTrace.length > 3 ? (
+          <Text dimColor>... {thoughtTrace.length - 3} more thought entries</Text>
+        ) : null}
         <Text>Final: {props.singleResult.finalText || "(empty)"}</Text>
         {props.showRawJson ? (
           <Text>{JSON.stringify(props.singleResult, null, 2)}</Text>
         ) : null}
+        {props.logFilePath ? <Text dimColor>Log file: {props.logFilePath}</Text> : null}
         <Text dimColor>r: rerun | t: raw json | o: mode | p: prompt | m: model | g: settings</Text>
       </Box>
     );
@@ -726,6 +794,7 @@ function ResultView(props: {
         {props.showRawJson ? (
           <Text>{JSON.stringify(props.benchmarkResult, null, 2)}</Text>
         ) : null}
+        {props.logFilePath ? <Text dimColor>Log file: {props.logFilePath}</Text> : null}
         <Text dimColor>r: rerun | t: raw json | o: mode | p: prompt | m: model | g: settings</Text>
       </Box>
     );
@@ -859,6 +928,13 @@ function adjustSetting(
 
 function clamp(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(value, max));
+}
+
+function truncateForUi(value: string, max: number): string {
+  if (value.length <= max) {
+    return value;
+  }
+  return `${value.slice(0, Math.max(0, max - 1))}…`;
 }
 
 render(<App />);

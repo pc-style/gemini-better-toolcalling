@@ -73,6 +73,7 @@ export async function runHybridRepairRunner(
 
     trace.push({ kind: "llm", detail: `turn_${turn}_request` });
     const response = await client.generateContent(request);
+    appendThoughtTrace(trace, `turn_${turn}`, response.thoughts ?? []);
     const functionCall = response.functionCalls[0];
 
     if (!functionCall) {
@@ -110,6 +111,7 @@ export async function runHybridRepairRunner(
             options.model,
           ),
         });
+        appendThoughtTrace(trace, "finalize", finalize.thoughts ?? []);
 
         return {
           strategy: "hybrid-repair",
@@ -211,6 +213,7 @@ async function resolveToolArgs(
     toolName,
     functionCall.args,
     repairModel,
+    trace,
     generationSettings,
   );
   const revalidated = registry.validateArgs(toolName, repairedArgs);
@@ -258,6 +261,7 @@ async function repairToolArgsWithLlm(
   toolName: string,
   brokenArgs: unknown,
   repairModel: string,
+  trace: RunnerTraceStep[],
   generationSettings: GenerationSettings | undefined,
 ): Promise<JsonObject> {
   const request: GenerateContentParameters = {
@@ -281,6 +285,7 @@ async function repairToolArgsWithLlm(
   };
 
   const response = await client.generateContent(request);
+  appendThoughtTrace(trace, "repair", response.thoughts ?? []);
   const parsed = parseJsonWithRepair(response.text);
   return toJsonObject(parsed, "Repaired tool args");
 }
@@ -306,6 +311,7 @@ async function fallbackViaStructuredIntent(
       model,
     ),
   });
+  appendThoughtTrace(trace, "fallback", response.thoughts ?? []);
 
   const intent = parseToolIntentText(response.text);
   if (intent.action === "respond") {
@@ -323,4 +329,18 @@ function toErrorMessage(error: unknown): string {
     return error.message;
   }
   return String(error);
+}
+
+function appendThoughtTrace(
+  trace: RunnerTraceStep[],
+  step: string,
+  thoughts: string[],
+): void {
+  for (const thought of thoughts) {
+    trace.push({
+      kind: "thought",
+      detail: `${step}_thought`,
+      data: { text: thought },
+    });
+  }
 }
