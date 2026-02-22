@@ -1,74 +1,59 @@
-# Handoff: Gemini Tool-Call Reliability Toolkit (CLI + TUI + Benchmark)
+# Handoff: Finalize Gemini Benchmark Reliability PR
 
 ## Goal
-Continue and finalize a production-ready toolkit that mitigates malformed Gemini tool calls by supporting three execution strategies (single-tool router, structured JSON, hybrid repair), with a polished CLI/TUI workflow, settings controls, and repeatable benchmark reporting.
+Continue and finish PR #1 (`pcstyle/fix-gemini-benchmark-stability`) by handling any new review feedback and landing the reliability/runtime improvements cleanly.
 
 ## Context
-- Core objective: make Gemini usable for coding-agent/tool workflows even when raw function-calling output is inconsistent or malformed.
-- Three strategy variants are implemented and wired:
-  - Single tool router
-  - Structured output (JSON contract)
-  - Hybrid repair flow
-- User explicitly requested:
-  - `.env.local` API key precedence over env vars
-  - Multi-step capability
-  - Interactive TUI with richer UX
-  - More test tools + premade prompts
-  - Full benchmark mode with TUI support and CLI flags
-  - Runtime settings controls: `thinking`, reasoning effort, model selection, retries, logging, verbose output
-- Key implementation direction already taken:
-  - Expanded model support and model discovery/catalog
-  - Unified generation settings handling for CLI + TUI
-  - Added benchmark orchestrator and report output
-  - Added/expanded tests for env, presets, tools, runners
-- Constraints/preferences to preserve:
-  - Bun-only workflow (`bun install`, `bun run ...`, `bun test`)
-  - Avoid running dev servers unless explicitly requested
-  - Vercel compatibility mindset
-  - Use current Gemini API/model reality (do not guess model IDs)
-- Last known state before interruption:
-  - Local checks/tests previously passing (`bun run check`, `bun test`)
-  - Live runs executed after thinking-config conflict fix
-  - TUI launched in TTY mode and accepted input
-- Session had interruptions (`turn_aborted`), so re-verify current behavior before any release or commit.
+- Repo: `/Users/pcstyle/projects/tools/gemini-tools-fix`
+- Branch: `pcstyle/fix-gemini-benchmark-stability`
+- PR: https://github.com/pc-style/gemini-better-toolcalling/pull/1
+- Re-review has already been requested from:
+  - `cubic-dev-ai`
+  - `chatgpt-codex-connector` (Codex)
+
+### What was done
+- Added robust model filtering and model probing in TUI before entering settings.
+- Added persistent log-to-file support for CLI and TUI.
+- Added runtime timeout + retry/backoff handling for transient Gemini errors.
+- Improved thinking/thought/tool-call visibility in verbose mode and TUI result screens.
+- Expanded tools/presets/benchmark metrics.
+- Added single-tool-router structured args repair fallback to reduce validation failures.
+- Added `.gemini/config.yaml` and `.gemini/styleguide.md` for higher-signal GitHub review behavior.
+
+### Review findings addressed
+Actionable findings from bots were fixed:
+1. `src/generation-settings.ts`: model-aware `thinking=false` behavior (budget mode vs thinking level).
+2. `tui.tsx`: safe logger creation fallback if filesystem is unwritable.
+3. `src/run-logger.ts`: unique log file naming to avoid same-second collisions.
+
+### Validation status
+- `bun run check` passes.
+- `bun test` passes (latest run: 33 pass, 0 fail).
+- Targeted live benchmark confirmed single-tool-router temp-conversion now succeeds via repair across `gemini-3-pro-preview`, `gemini-3.1-pro-preview`, and `gemini-2.5-flash-lite`.
 
 ## Key Files
-- `/Users/pcstyle/projects/tools/gemini-tools-fix/index.ts` - Main CLI entrypoint; parses flags and dispatches run/benchmark paths.
-- `/Users/pcstyle/projects/tools/gemini-tools-fix/tui.tsx` - Ink-based interactive TUI flow, settings UI, and benchmark integration.
-- `/Users/pcstyle/projects/tools/gemini-tools-fix/src/strategy-runner.ts` - Cross-strategy orchestration and execution control.
-- `/Users/pcstyle/projects/tools/gemini-tools-fix/src/benchmark.ts` - Benchmark runner, aggregation, and comparison/report logic.
-- `/Users/pcstyle/projects/tools/gemini-tools-fix/src/generation-settings.ts` - Central handling of thinking/reasoning/max retries/logging-related generation settings.
-- `/Users/pcstyle/projects/tools/gemini-tools-fix/src/model-catalog.ts` - Supported Gemini model list/discovery and validation helpers.
-- `/Users/pcstyle/projects/tools/gemini-tools-fix/src/env.ts` - Environment loading logic; `.env.local` precedence behavior.
-- `/Users/pcstyle/projects/tools/gemini-tools-fix/src/prompt-presets.ts` - Premade prompts used by CLI/TUI.
-- `/Users/pcstyle/projects/tools/gemini-tools-fix/src/demo-tools.ts` - Test/demo tools used to stress and validate tool-call behavior.
-- `/Users/pcstyle/projects/tools/gemini-tools-fix/src/runners/single-tool-router-runner.ts` - Router strategy implementation.
-- `/Users/pcstyle/projects/tools/gemini-tools-fix/src/runners/structured-json-runner.ts` - Structured JSON strategy implementation.
-- `/Users/pcstyle/projects/tools/gemini-tools-fix/src/runners/hybrid-repair-runner.ts` - Hybrid repair strategy implementation.
-- `/Users/pcstyle/projects/tools/gemini-tools-fix/README.md` - User-facing setup/usage docs; must match latest flags and TUI behavior.
-- `/Users/pcstyle/projects/tools/gemini-tools-fix/AGENTS.md` - Repo-local operating instructions and constraints.
-- `/Users/pcstyle/projects/tools/gemini-tools-fix/package.json` - Scripts and runtime dependencies.
-- `/Users/pcstyle/projects/tools/gemini-tools-fix/test/env.test.ts` - Env precedence tests.
-- `/Users/pcstyle/projects/tools/gemini-tools-fix/test/strategy-runner.test.ts` - Strategy orchestration tests.
-- `/Users/pcstyle/projects/tools/gemini-tools-fix/test/demo-tools.test.ts` - Demo tool behavior tests.
-- `/Users/pcstyle/projects/tools/gemini-tools-fix/test/prompt-presets.test.ts` - Prompt preset coverage.
+- `index.ts` - CLI arg parsing, benchmark execution, console/file logging wiring.
+- `tui.tsx` - TUI flow, model validation probe, runtime logging, result views.
+- `src/gemini-client.ts` - Gemini API wrapper, timeouts, retry/backoff, thought extraction.
+- `src/generation-settings.ts` - thinking config model-compat logic.
+- `src/model-catalog.ts` - model discovery/filtering + availability probe.
+- `src/strategy-runner.ts` - strategy orchestration, verbose logging, API key normalization.
+- `src/runners/single-tool-router-runner.ts` - dispatch tool flow + args repair fallback.
+- `src/runners/hybrid-repair-runner.ts` - hybrid strategy repair/fallback flow.
+- `src/runners/structured-json-runner.ts` - structured-json strategy thought trace capture.
+- `src/demo-tools.ts` - tool schemas + alias normalization/coercion.
+- `src/run-logger.ts` - log file creation and write utility.
+- `src/benchmark.ts` - benchmark execution, aggregates/comparisons metrics.
+- `test/single-tool-router-runner.test.ts` - router behavior and repair regression coverage.
+- `test/demo-tools.test.ts` - arg normalization/coercion coverage.
+- `test/generation-settings.test.ts` - thinking config compatibility tests.
+- `.gemini/config.yaml` - Gemini Code Assist review configuration.
+- `.gemini/styleguide.md` - Gemini Code Assist review style instructions.
+- `.gitignore` - local agent/skills and local artifacts ignore rules.
 
 ## Next Steps
-1. Re-run validation after interrupted session:
-   - `bun run check`
-   - `bun test`
-2. Smoke test CLI paths with representative flags:
-   - Single strategy run
-   - Multi-step run
-   - Benchmark run with retries/model overrides/logging toggles
-3. Smoke test TUI end-to-end:
-   - Settings edits (thinking/reasoning/model/retries/log level/verbose)
-   - Strategy execution
-   - Benchmark flow and summary rendering
-4. Confirm `.env.local` precedence in real run (not only unit test) by temporarily setting conflicting env values.
-5. Update `README.md` for any remaining gaps in:
-   - Flag documentation
-   - Supported models
-   - Benchmark usage examples
-   - TUI controls and shortcuts
-6. If all green, prepare conventional commit(s) split by logical scope (runtime/settings vs docs/tests), without amending prior commits.
+1. Check PR #1 for fresh review comments from cubic/codex and implement any new actionable items.
+2. Re-run `bun run check` and `bun test` after each fix batch.
+3. Keep commits focused with conventional messages; push to same branch.
+4. Reply to review threads with what changed and where.
+5. Once reviews are clean, request final approval/merge from user.
