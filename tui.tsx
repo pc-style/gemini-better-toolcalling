@@ -402,7 +402,19 @@ function App(): React.JSX.Element {
         selectedModels.length * selectedStrategies.length * selectedPresets.length * selection.settings.iterations;
       setRunningStartedRuns(0);
       setRunningTotalRuns(selection.mode === "benchmark" ? benchmarkTotalRuns : 1);
-      const fileLogger = selection.settings.logs ? createFileLogger("tui") : null;
+      let fileLogger: ReturnType<typeof createFileLogger> | null = null;
+      if (selection.settings.logs) {
+        try {
+          fileLogger = createFileLogger("tui");
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          setRunLogs((prev) => [
+            ...prev.slice(-25),
+            `[warn] file logging unavailable: ${message}`,
+          ]);
+          fileLogger = null;
+        }
+      }
       setRunLogFilePath(fileLogger?.path ?? null);
       if (fileLogger) {
         setRunLogs((prev) => [...prev.slice(-25), `[log-file] ${fileLogger.path}`]);

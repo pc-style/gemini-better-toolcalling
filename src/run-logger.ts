@@ -31,6 +31,10 @@ function timestamp(): string {
     pad(now.getUTCHours()),
     pad(now.getUTCMinutes()),
     pad(now.getUTCSeconds()),
+    "-",
+    String(now.getUTCMilliseconds()).padStart(3, "0"),
+    "-",
+    String(process.pid),
   ];
   return parts.join("");
 }
@@ -38,4 +42,3 @@ function timestamp(): string {
 function pad(value: number): string {
   return String(value).padStart(2, "0");
 }
-

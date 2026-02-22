@@ -46,9 +46,16 @@ function toThinkingConfig(
   model?: string,
 ): ThinkingConfig {
   if (!settings.thinking) {
+    if (shouldUseBudgetMode(model)) {
+      return {
+        includeThoughts: settings.includeThoughts,
+        thinkingBudget: 0,
+      };
+    }
+
     return {
       includeThoughts: settings.includeThoughts,
-      thinkingBudget: 0,
+      thinkingLevel: ThinkingLevel.MINIMAL,
     };
   }
 
